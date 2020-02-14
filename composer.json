@@ -1,0 +1,24 @@
+{
+    "name": "digitaladapt/vigilant-form-kit",
+    "description": "(Software Development) Kit for VigilantForm.",
+    "homepage": "https://github.com/digitaladapt/vigilant-form-kit",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Andrew Stowell",
+            "email": "andrew@digitaladapt.com",
+            "homepage": "https://www.digitaladapt.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.2.0",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^6.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "VigilantForm\\Kit\\": "src/"
+        }
+    }
+}
