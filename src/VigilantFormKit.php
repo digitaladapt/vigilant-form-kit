@@ -5,41 +5,65 @@ namespace VigilantForm\Kit;
 use DateTime;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
-use InvalidArgumentException;
-use UnderflowException;
+use Psr\Log\{LoggerAwareInterface, LoggerAwareTrait, LoggerInterface, NullLogger};
 use UnexpectedValueException;
 
 /**
- * use VigilantForm\Kit\{VigilantFormKit, SessionBag};
+ * use VigilantForm\Kit\VigilantFormKit;
  *
- * VigilantFormKit::setSession();
- * VigilantFormKit::trackSource();
- * On first page visited (or every page) will log meta and links.
+ * $vigilantFormKit = new VigilantFormKit("<SERVER_URL>", "<CLIENT_ID>", "<CLIENT_SECRET>");
  *
- * VigilantFormKit::setSession();
- * VigilantFormKit::generateForm($honeypot_name);
- * Will generate the html for the honeypot field.
+ * // optional, defaults to (new SessionBag(), "vigilantform_")
+ * $vigilantFormKit->setSession($session, "<PREFIX>");
  *
- * VigilantFormKit::setSession();
- * $vigilantFormKit = new VigilantFormKit($server_url, $client_id, $client_secret);
- * $vigilantFormKit->submitForm($website, $form_title, $form_fields, $honeypot_name);
- * Will determine if the user failed the honeypot test, calcualte duration,
- * and submit the form submission to the vigilant-form server.
+ * // optional, defaults to ("age", "form_sequence")
+ * // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
+ * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>")
  *
- * Note: the honeypot field name must not be the same name as a real field.
+ * // optional, defaults to (new NullLogger())
+ * $vigilantFormKit->setLogger($logger);
+ *
+ *
+ *
+ * // once everything is setup, run the tracking
+ * $vigilantFormKit->trackSource();
+ *
+ *
+ *
+ * // within each html form, recommend just before submit
+ * echo $vigilantFormKit->generateHoneypot();
+ *
+ *
+ *
+ * if (!empty($_POST)) {
+ *     try {
+ *         // will determine if user failed the honeypot test, calculate duration, and submit to server.
+ *         $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST)
+ *     } catch (UnexpectedValueException $exception) {
+ *         // handle submitForm failure
+ *     }
+ * }
  */
-class VigilantFormKit
+class VigilantFormKit implements LoggerAwareInterface
 {
+    use LoggerAwareTrait;
+
     protected const DATE_FORMAT = 'Y-m-d H:i:s.u';
 
-    /** @var object with put(), get(), and put(); such as SessionBag */
-    protected static $session = null;
+    protected const DEFAULT_PREFIX = 'vigilantform_';
 
-    /** @var string defaults to "vigilant_form." */
-    protected static $prefix = null;
+    protected const DEFAULT_HONEYPOT = 'age';
+
+    protected const DEFAULT_SEQUENCE = 'form_sequence';
+
+    /** @var int sequence for this page view */
+    protected $seq_id;
+
+    /** @var DateTime time associated with this page view */
+    protected $seq_time;
 
     /** @var int to make each form instance use a unique id */
-    protected static $index = 1;
+    protected $instance;
 
     /** @var string server-url */
     protected $url;
@@ -47,102 +71,21 @@ class VigilantFormKit
     /** @var array client-auth: ['id' => '', 'secret' => ''] */
     protected $auth;
 
-    /* Public Static Functions ---------------------------------------------- */
+    /** @var object with exists(), get(), and put(); defaults to SessionBag */
+    protected $session;
 
-    /**
-     * @param object $session Object with exists(), get(), and put();, such as SessionBag.
-     * @param string $prefix Prefix variables within session, to prevent collisions.
-     * @throws InvalidArgumentException If the given $session object lacks required methods.
-     */
-    public static function setSession(object $session = null, string $prefix = 'vigilant_form.'): void
-    {
-        if (is_null($session)) {
-            /* default to simple session */
-            $session = new SessionBag();
-        } elseif (!method_exists($session, 'exists') || !method_exists($session, 'get') || !method_exists($session, 'put')) {
-            /* duck-footing failed, given storage object is insufficient */
-            throw new InvalidArgumentException('Given session object lacks exists/get/put functions.');
-        }
+    /** @var string prefix for the fields within session, defaults to "vigilantform_" */
+    protected $prefix;
 
-        static::$session = $session;
-        static::$prefix  = $prefix;
-    }
+    /** @var string name of the honeypot form field, defaults to "age" */
+    protected $honeypot;
 
-    /**
-     * Sets various meta data, if not already set.
-     */
-    public static function trackSource(): void
-    {
-        static::needsSession();
+    /** @var string name of the sequence form field, defaults to "form_sequence" */
+    protected $sequence;
 
-        /* meta */
-        if (!static::$session->exists(static::$prefix . 'ip_address')) {
-            static::$session->put(static::$prefix . 'ip_address', ($_SERVER['REMOTE_ADDR'] ?? null));
-        }
-        if (!static::$session->exists(static::$prefix . 'user_agent')) {
-            static::$session->put(static::$prefix . 'user_agent', ($_SERVER['HTTP_USER_AGENT'] ?? null));
-        }
-        if (!static::$session->exists(static::$prefix . 'http_headers')) {
-            static::$session->put(static::$prefix . 'http_headers', static::getHttpHeaders());
-        }
+    /* LoggerInterface $logger from LoggerAwareTrait */
 
-        /* links */
-        if (!static::$session->exists(static::$prefix . 'referral')) {
-            static::$session->put(static::$prefix . 'referral', ($_SERVER['HTTP_REFERER'] ?? null));
-        }
-        if (!static::$session->exists(static::$prefix . 'landing')) {
-            static::$session->put(static::$prefix . 'landing', ($_SERVER['REQUEST_URI'] ?? null));
-        }
-
-        /* get when this page was requested */
-        $time = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT']);
-
-        /* last time they visited this specific page */
-        static::$session->put(static::$prefix . "form_{$_SERVER['REQUEST_URI']}", $time->format(static::DATE_FORMAT));
-
-        /* last time they visited any page, needed as a fallback */
-        static::$session->put(static::$prefix . 'submit', ($_SERVER['REQUEST_URI'] ?? null));
-        static::$session->put(static::$prefix . 'timestamp', $time->format(static::DATE_FORMAT));
-    }
-
-    /**
-     * Honeypot logic: we use javascript to hide the input, and fill it with the correct answer.
-     * If the client does not use javascript, they will be requested to answer a simple math question.
-     * @param string $honeypot_name An HTML field name, whici is unique for the form.
-     * @return Returns string of HTML which needs to be added to the form, for the honeypot.
-     */
-    public static function generateForm(string $honeypot_name): string
-    {
-        static::needsSession();
-
-        /* get when this page was requested */
-        $time = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT']);
-
-        /* incrementing index to ensure each html ID is unique */
-        $index = static::$index;
-        static::$index++;
-
-        [$second, $micro] = static::mathProblem($time);
-
-        return <<<HTML
-<div id="{$honeypot_name}_c{$index}">
-    <label for="{$honeypot_name}_i{$index}">What is {$second} plus {$micro}?</label>
-    <input type="text" id="{$honeypot_name}_i{$index}" name="{$honeypot_name}" autocomplete="off">
-</div>
-<script>
-    document.getElementById("{$honeypot_name}_c{$index}").style.position   = "absolute";
-    document.getElementById("{$honeypot_name}_c{$index}").style.height     = "11px";
-    document.getElementById("{$honeypot_name}_c{$index}").style.width      = "11px";
-    document.getElementById("{$honeypot_name}_c{$index}").style.textIndent = "11px";
-    document.getElementById("{$honeypot_name}_c{$index}").style.overflow   = "hidden";
-
-    document.getElementById("{$honeypot_name}_i{$index}").tabIndex = -1;
-    document.getElementById("{$honeypot_name}_i{$index}").value = {$second} + {$micro};
-</script>
-HTML;
-    }
-
-    /* Public Functions ----------------------------------------------------- */
+    /* ---- Public Functions ---- */
 
     /**
      * @param string $server_url
@@ -151,62 +94,199 @@ HTML;
      */
     public function __construct(string $server_url, string $client_id, string $client_secret)
     {
-        $this->url  = $server_url;
-        $this->auth = [
+        $this->seq_id   = null; /* defer */
+        $this->seq_time = null; /* defer */
+        $this->instance = 1;
+        $this->url      = $server_url;
+        $this->auth     = [
             'id'     => $client_id,
             'secret' => $client_secret,
         ];
+        $this->session  = null; /* defer */
+        $this->prefix   = static::DEFAULT_PREFIX;
+        $this->honeypot = static::DEFAULT_HONEYPOT;
+        $this->sequence = static::DEFAULT_SEQUENCE;
+        $this->logger   = new NullLogger();
     }
 
     /**
-     * @param string $website
-     * @param string $form_title
-     * @param array $form_fields
-     * @param string $honeypot_name
-     * @return bool Returns true if the form was successfully submitted.
-     * @throws UnexpectedValueException
+     * To disable prefix set to "", null will result in the default prefix.
+     * @param object $session Optional, object with exists(), get(), and put(); defaults to SessionBag.
+     * @param string $prefix Optional, prefix for the fields within session, defaults to "vigilantform_".
+     * @throws UnexpectedValueException If the given $session object lacks required methods.
+     * @return void
      */
-    public function submitForm(string $website, string $form_title, array $form_fields, string $honeypot_name): bool
+    public function setSession(object $session = null, string $prefix = null): void
     {
-        static::needsSession();
+        if (!$session) {
+            /* no $session given, default to SessionBag */
+            $this->session = new SessionBag();
+        } elseif (!method_exists($session, 'exists') || !method_exists($session, 'get') || !method_exists($session, 'put')) {
+            /* given $session object is insufficient */
+            throw new UnexpectedValueException('Given session object lacks exists/get/put functions.');
+        } else {
+            /* $session accepted */
+            $this->session = $session;
+        }
+
+        /* check against null, to allow blank string */
+        $this->prefix = $prefix ?? static::DEFAULT_PREFIX;
+    }
+
+    /**
+     * @param string $honeypot Optional, name of the honeypot form field, defaults to "age".
+     * @param string $sequence Optional, name of the sequence form field, defaults to "form_sequence".
+     */
+    public function setHoneypot(string $honeypot = null, string $sequence = null): void
+    {
+        $this->honeypot = $honeypot ?: static::DEFAULT_HONEYPOT;
+        $this->sequence = $sequence ?: static::DEFAULT_SEQUENCE;
+    }
+
+    /* setLogger() provided by LoggerAwareTrait */
+
+    /**
+     * Sets various meta data, based on $_SERVER, so we have it when the form is submitted.
+     */
+    public function trackSource(): void
+    {
+        $this->loadSession();
+
+        /* meta - set on first page */
+        if (!$this->session->exists($this->addPrefix('ip_address'))) {
+            $this->session->put($this->addPrefix('ip_address'), $_SERVER['REMOTE_ADDR'] ?? null);
+        }
+        if (!$this->session->exists($this->addPrefix('user_agent'))) {
+            $this->session->put($this->addPrefix('user_agent'), $_SERVER['HTTP_USER_AGENT'] ?? null);
+        }
+        if (!$this->session->exists($this->addPrefix('http_headers'))) {
+            $this->session->put($this->addPrefix('http_headers'), $this->getHttpHeaders());
+        }
+
+        /* links - set of first page */
+        if (!$this->session->exists($this->addPrefix('referral'))) {
+            $this->session->put($this->addPrefix('referral'), $_SERVER['HTTP_REFERER'] ?? null);
+        }
+        if (!$this->session->exists($this->addPrefix('landing'))) {
+            $this->session->put($this->addPrefix('landing'),
+                ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
+                ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
+                ($_SERVER['REQUEST_URI'] ?? '/')
+            );
+        }
+
+        /* determine when this page was requested */
+        $time = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT'] ?? number_format(microtime(true), 6, '.', ''));
+
+        /* manage sequence, array starts with one element so all our ids are positive */
+        $sequenceList   = $this->session->get($this->addPrefix('sequence'), [0 => false]);
+        $this->seq_id   = count($sequenceList);
+        $this->seq_time = $time;
+        $sequenceList[$this->seq_id] = $time->format(static::DATE_FORMAT);
+        $this->session->put($this->addPrefix('sequence'), $sequenceList);
+    }
+
+    /**
+     * Call once per html form, reusing the html multiple times will cause problems.
+     * If user has javascript disabled, to pass the honeypot, they'll be asked
+     * a simple math problem. If they have javascript, they will see nothing.
+     * @return string Returns chunk of html to insert into a form.
+     */
+    public function generateHoneypot(): string
+    {
+        $this->loadSession();
+
+        $index = $this->instance;
+        $this->instance++;
+
+        [$second, $micro] = $this->mathProblem($this->seq_time);
+
+        return <<<HTML
+<div id="{$this->honeypot}_c{$index}">
+    <input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
+    <label for="{$this->honeypot}_i{$index}">What is {$second} plus {$micro}?</label>
+    <input type="text" id="{$this->honeypot}_i{$index}" name="{$this->honeypot}" autocomplete="off">
+</div>
+<script>
+    document.getElementById("{$this->honeypot}_c{$index}").style.position   = "absolute";
+    document.getElementById("{$this->honeypot}_c{$index}").style.height     = "12px";
+    document.getElementById("{$this->honeypot}_c{$index}").style.width      = "12px";
+    document.getElementById("{$this->honeypot}_c{$index}").style.textIndent = "12px";
+    document.getElementById("{$this->honeypot}_c{$index}").style.overflow   = "hidden";
+
+    document.getElementById("{$this->honeypot}_i{$index}").tabIndex = -1;
+    document.getElementById("{$this->honeypot}_i{$index}").value = {$second} + {$micro};
+</script>
+HTML;
+    }
+
+    /**
+     * @param string $website Name of the website that the form exists on.
+     * @param string $form_title Name of the form was submitted.
+     * @param array $fields The user submission, such as $_POST.
+     * @return bool Returns true on success, will throw an exception otherwise.
+     * @throws UnexpectedValueException when attempt to store form is unsuccessful.
+     */
+    public function submitForm(string $website, string $form_title, array $fields): bool
+    {
+        $this->loadSession();
 
         /*  determine the status of duration, honeypot, and submit */
-        [$duration, $honeypot, $submit] = static::calculateMeta($form_fields[$honeypot_name] ?? null);
+        [$duration, $honeypot, $submit] = $this->calculateMeta($fields);
 
-        /* remove the honeypot from the form fields */
-        unset($form_fields[$honeypot_name]);
+        /* remove the honeypot and sequence from the form fields */
+        unset($fields[$this->honeypot]);
+        unset($fields[$this->sequence]);
 
         /* submit form to the vigilant-form server */
         $guzzle = new Client([
             'allow_redirects' => false,
             'base_uri'        => $this->url,
-            'timeout'         => 60.0,
+            'timeout'         => 10.0,
             'headers'         => [
                 'X-Requested-With' => 'XMLHttpRequest',
             ],
         ]);
 
+        $meta = [
+            'ip_address'   => $this->session->get($this->addPrefix('ip_address')),
+            'user_agent'   => $this->session->get($this->addPrefix('user_agent')),
+            'http_headers' => $this->session->get($this->addPrefix('http_headers')),
+            'honeypot'     => $honeypot,
+            'duration'     => $duration,
+        ];
+
+        $source = [
+            'website' => $website,
+            'title'   => $form_title,
+        ];
+
+        $links = [
+            'referral' => $this->session->get($this->addPrefix('referral')),
+            'landing'  => $this->session->get($this->addPrefix('landing')),
+            'submit'   => $submit,
+        ];
+
+        /* log the request */
+        $this->logger->info('Submitting to VigilantForm: {data}', ['data' => json_encode([
+            'fields' => $fields,
+            'meta'   => $meta,
+            'source' => $source,
+            'links'  => $links,
+        ])]);
+
         try {
             $response = $guzzle->post('', ['json' => [
                 'auth'   => $this->auth,
-                'fields' => $form_fields,
-                'meta'   => [
-                    'ip_address'   => static::$session->get(static::$prefix . 'ip_address'),
-                    'user_agent'   => static::$session->get(static::$prefix . 'user_agent'),
-                    'http_headers' => static::$session->get(static::$prefix . 'http_headers'),
-                    'honeypot'     => $honeypot,
-                    'duration'     => $duration,
-                ],
-                'source' => [
-                    'website' => $website,
-                    'title'   => $form_title,
-                ],
-                'links'  => [
-                    'referral' => static::$session->get(static::$prefix . 'referral'),
-                    'landing'  => static::$session->get(static::$prefix . 'landing'),
-                    'submit'   => $submit,
-                ],
+                'fields' => $fields,
+                'meta'   => $meta,
+                'source' => $source,
+                'links'  => $links,
             ]]);
+
+            /* log the response */
+            $this->logger->info('Response from VigilantForm: {data}', ['data' => (string)$response->getBody()]);
+
             $data = json_decode((string)$response->getBody());
 
             if (isset($data->success)) {
@@ -221,24 +301,31 @@ HTML;
         }
     }
 
-    /* Protected Static Functions ------------------------------------------- */
+    /* ---- Protected Functions ---- */
 
     /**
-     * Ensure we have a session available for use.
-     * @throws UnderflowException
+     * We delay assigning session until we need it, so that setSession() can be called.
      */
-    protected static function needsSession(): void
+    protected function loadSession(): void
     {
-        if (is_null(static::$session)) {
-            throw new UnderflowException('Session must be set before calling any other functions.');
+        if ($this->session === null) {
+            $this->session = new SessionBag();
         }
     }
 
     /**
-     * @param array $headers An array of headers.
-     * @return array Returns array of only the http-related headers.
+     * @param string $field The name of the field we need to prefix.
+     * @return string Returns the given field with the prefix added.
      */
-    protected static function getHttpHeaders(): array
+    protected function addPrefix(string $field): string
+    {
+        return $this->prefix . $field;
+    }
+
+    /**
+     * @return array Returns array of http headers.
+     */
+    protected function getHttpHeaders(): array
     {
         $output = [];
 
@@ -258,59 +345,49 @@ HTML;
     }
 
     /**
-     * @param DateTime $timestamp
-     * @return array returns two numbers, based on the given timestamp.
+     * @param DateTime $time When the form was requested.
+     * @return array Returns array of two ints, based on our sequence time.
      */
-    protected static function mathProblem(DateTime $timestamp): array
+    protected function mathProblem(DateTime $time): array
     {
         /* get two digits from the seconds; for our simple math problem. */
-        $second = (int)$timestamp->format('s');
+        $second = (int)$time->format('s');
         /* get the first two meaningful digits from the microseconds; IE: 000010 becomes 10; 123456 becomes 12. */
-        $micro  = (int)((float)('0.' . (int)$timestamp->format('u')) * 100);
+        $micro  = (int)((float)('0.' . (int)$time->format('u')) * 100);
 
         return [$second, $micro];
     }
 
     /**
-     * @param string $honeypot_value
-     * @return array Returns duration, honeypot, and submit.
-     * @throws UnexpectedValueException
+     * @param array $fields The form submission, so we get the honeypot and sequence.
+     * @return array Returns $duration, $honeypot, and $submit_link.
      */
-    protected static function calculateMeta(string $honeypot_value = null): array
+    protected function calculateMeta(array $fields): array
     {
-        /* get timestamp of when the form was generated, so we can determine the duration */
-        $timestamp = null;
-        $submit    = null;
-        if (isset($_SERVER['HTTP_REFERER'])) {
-            /* use the referer to determine what the request_uri for the previous page */
-            [, $referer_uri] = explode($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'], $_SERVER['HTTP_REFERER']);
-            $timestamp = static::$session->get(static::$prefix . "form_{$referer_uri}");
-            $submit    = $referer_uri;
+        $submit         = $_SERVER['HTTP_REFERER'] ?? null;
+        $honeypot_value = $fields[$this->honeypot] ?? null;
+        $seq_id         = $fields[$this->sequence] ?? null;
+        $sequenceList   = $this->session->get($this->addPrefix('sequence'), [0 => false]);
+        $now            = $this->seq_time;
+
+        /* get timestamp of when the form was generated, if sequence is invalid then use the previous page load timestamp as fallback */
+        $then = DateTime::createFromFormat(static::DATE_FORMAT, $sequenceList[$seq_id] ?? $sequenceList[$this->seq_id - 1] ?? false);
+
+        if ($then) {
+            /* calculate duration */
+            $diff     = $now->diff($then, true);
+            $duration = $diff->format('%s.%F');
+
+            /* determine if the user failed the honeypot test */
+            [$second, $micro] = $this->mathProblem($then);
+
+            /* to avoid falling for the honeypot, the field must be present, and it's value must be the expected output */
+            $honeypot = is_null($honeypot_value) || ($honeypot_value !== (string)($second + $micro));
+        } else {
+            /* no other timestamp to compare to, so duration is -1 second, and honeypot is failed */
+            $duration = '-1.00000';
+            $honeypot = true;
         }
-        if (is_null($timestamp) || is_null($submit)) {
-            /* was unable to look up timestamp by the referred form, fallback to timestamp of last form loaded */
-            $timestamp = static::$session->get(static::$prefix . 'timestamp');
-            $submit    = static::$session->get(static::$prefix . 'submit');
-        }
-
-        /* turn time data into DateTime objects */
-        $then = DateTime::createFromFormat(static::DATE_FORMAT, $timestamp);
-        $now  = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT']);
-
-        if (!$then || !$now) {
-            /* in the unlikely event we do not have dates to work with, throw an exception */
-            throw new UnexpectedValueException('Invalid state, unable to parse dates: ' . json_encode(['then' => $timestamp, 'now' => $_SERVER['REQUEST_TIME_FLOAT']]));
-        }
-
-        /* calculate duration */
-        $diff     = $now->diff($then, true);
-        $duration = $diff->format('%s.%F');
-
-        /* determine if the user failed the honeypot test */
-        [$second, $micro] = static::mathProblem($then);
-
-        /* to avoid falling for the honeypot, the field must be present, and it's value must be the expected output */
-        $honeypot = is_null($honeypot_value) || ($honeypot_value !== (string)($second + $micro));
 
         return [$duration, $honeypot, $submit];
     }

@@ -1,84 +1,71 @@
 # vigilant-form-kit
 (Software Development) Kit for VigilantForm.
 
-*Warning: Work In Progress*
-
-## What is is?
+## So what is this?
 VigilantFormKit is a simple library to make it easy to push your form submissions into an instance of VigilantForm.
 
-## So what is VigilantForm, then?
-VigilantForm is my attempt to stop spam-bots from filling out forms on my website, and clogging up my CRM.
-So rather then taking form submissions and putting them directly in your database, you push them to VigilantForm.
-It scores the submission, based on whatever logic you like; some examples include:
+## So what is VigilantForm?
+VigilantForm is my attempt to keep junk form submissions from getting put in my CRM.
+
+So rather then putting form submissions directly into my CRM, I push them to VigilantForm.
+
+VigilantForm scores the submission, based on whatever scoring logic you choose; some examples include:
 * checking if they passed the honeypot test
 * checking how quickly the form was submitted
 * checking if the email is valid (syntax and dns check)
-* checking if the phone is valid
+* checking if the phone number is reasonable
+* checking if required fields are filled out
 * checking origin of the ip-address (via ipstack.com)
 * looking for bad input, like "http://" in the name field
 * and so on
 
-Once scored, decide what to do with it, push it into your CRM, send a Discord notification, send an email, silently ignore it, or whatever.
+After scoring is complete, the form submission is graded, and you can take different custom actions depending on the grade.
 
-## Cool, so how do I use the kit?
-After setting up your instance of VigilantForm, using the kit is simple.
+For example, I push quality form submissions into my CRM, but form submissions which need review go to Discord, with links to approve/reject;
+meanwhile junk form submissions get logged to a file for periodic review, and spam form submsissions quietly get trashed.
 
-In your website, where you want to use the kit:
-```php
+## So how is it used?
+First you add the library:
+```bash
 composer require vigilant-form-kit
 ```
 
-### On every page visited, upkeep the user's data:
-By default it will use the existing php session, if it's already started, or create
-a new session with the defaults.
+Then you hook it into your application:
 ```php
-use VigilantForm\Kit\{VigilantFormKit, SessionBag};
+use UnexpectedValueException;
+use VigilantForm\Kit\VigilantFormKit;
 
-VigilantFormKit::setSession();
-VigilantFormKit::trackSource();
+/* once per page, setup and run the tracking */
+$vigilantFormKit = new VigilantFormKit("<SERVER_URL>", "<CLIENT_ID>", "<CLIENT_SECRET>");
+
+// optional, defaults to (new SessionBag(), "vigilantform_")
+// note: for Laravel you can use $request->session().
+//$vigilantFormKit->setSession($session, "<PREFIX>");
+
+// optional, defaults to ("age", "form_sequence")
+// note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
+//$vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>")
+
+// optional, defaults to (new NullLogger())
+//$vigilantFormKit->setLogger($logger);
+
+// once everything is setup, run the tracking
+$vigilantFormKit->trackSource();
+
+
+
+/* once per form, add honeypot field */
+echo $vigilantFormKit->generateHoneypot();
+
+
+
+/* handle form submission */
+if (!empty($_POST)) {
+    try {
+        // will determine if user failed the honeypot test, calculate duration, and submit to server.
+        $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST)
+    } catch (UnexpectedValueException $exception) {
+        // handle submitForm failure
+    }
+}
 ```
-If you already use a php session, make sure to open it before calling.
-
-If you use something like Laravel, you can pass the session object to ::setSession():
-```php
-/** @var Request $request */
-VigilantFormKit::setSession($request->session());
-```
-Now we'll use the session that Laravel manages.
-
-### When you have a form on the page:
-Inject a honeypot field into each form, so we can use that for scoring later:
-```php
-$html = VigilantFormKit::generateForm('real-sounding-unique-form-field-name');
-```
-*Note: the honeypot field name must not be the same name as a real field.*
-But it is best for the honeypot field to avoid anything blantant, such as "honeypot" or "trap".
-
-### Handling the form submit
-```php
-$vigilantFormKit = new VigilantFormKit($server_url, $client_id, $client_secret);
-$success = $vigilantFormKit->submitForm($website, $form_title, $form_fields, $honeypot_name);
-```
-This will determine if the user failed the honeypot test, calcualte duration,
-and submit the form submission to your VigilentForm instance.
-
-$success will be true, if anythig went wrong, an exception will be thrown.
-So this should be in a try/catch block.
-
-*Note: if you call trackeSource() on the same request as calling submitForm(), you'll need to make sure that the submitForm() happens between setSession() and trackSource().*
-My recommendation would be setting up a default middleware which does the trackeSource() and disable that middleware for your controller which handles the form submit.
-I'll get a sample of doing all this in vanilla php and Laravel 6.x at some point.
-
-## Using another framework session
-If setting data directly within ```$_SESSION``` isn't how your framework uses the session,
-you can easily make a simple wrapper to pass to setSession(), like you can with Laravel.
-
-Checkout the SessionBag class, basically any class with the three following functions is allowed:
-* exists($field): bool
-* get($field): mixed
-* put($field, $value)
-
-The session class support is "duck-footed", which is to say, rather than implementing some interface,
-we check the class to contain the needed methods instead. This means in the case of Laravel,
-the Kit supports Laravel without having any specific ties to it.
-
