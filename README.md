@@ -1,3 +1,5 @@
+[![CodeFactor](https://www.codefactor.io/repository/github/digitaladapt/vigilant-form-kit/badge)](https://www.codefactor.io/repository/github/digitaladapt/vigilant-form-kit)
+
 # vigilant-form-kit
 (Software Development) Kit for VigilantForm.
 
