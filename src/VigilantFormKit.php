@@ -268,12 +268,12 @@ HTML;
         ];
 
         /* log the request */
-        $this->logger->info('Submitting to VigilantForm: {data}', ['data' => json_encode([
+        $this->logger->info('Submitting to VigilantForm: {data}', ['data' => [
             'fields' => $fields,
             'meta'   => $meta,
             'source' => $source,
             'links'  => $links,
-        ])]);
+        ]]);
 
         try {
             $response = $guzzle->post('', ['json' => [
