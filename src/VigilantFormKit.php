@@ -182,7 +182,13 @@ class VigilantFormKit implements LoggerAwareInterface
         $sequenceList   = $this->session->get($this->addPrefix('sequence'), [0 => false]);
         $this->seq_id   = count($sequenceList);
         $this->seq_time = $time;
-        $sequenceList[$this->seq_id] = $time->format(static::DATE_FORMAT);
+        $sequenceList[$this->seq_id] = [
+            'time' => $time->format(static::DATE_FORMAT),
+            'url'  =>
+                ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
+                ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
+                ($_SERVER['REQUEST_URI'] ?? '/'),
+        ];
         $this->session->put($this->addPrefix('sequence'), $sequenceList);
     }
 
@@ -265,6 +271,7 @@ HTML;
             'referral' => $this->session->get($this->addPrefix('referral')),
             'landing'  => $this->session->get($this->addPrefix('landing')),
             'submit'   => $submit,
+            'details'  => array_filter($this->session->get($this->addPrefix('sequence'), [0 => false])),
         ];
 
         /* log the request */
@@ -371,7 +378,7 @@ HTML;
         $now            = $this->seq_time;
 
         /* get timestamp of when the form was generated, if sequence is invalid then use the previous page load timestamp as fallback */
-        $then = DateTime::createFromFormat(static::DATE_FORMAT, $sequenceList[$seq_id] ?? $sequenceList[$this->seq_id - 1] ?? false);
+        $then = DateTime::createFromFormat(static::DATE_FORMAT, $sequenceList[$seq_id]['time'] ?? $sequenceList[$this->seq_id - 1]['time'] ?? false);
 
         if ($then) {
             /* calculate duration */
