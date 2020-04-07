@@ -9,6 +9,9 @@ use Psr\Log\{LoggerAwareInterface, LoggerAwareTrait, LoggerInterface, NullLogger
 use UnexpectedValueException;
 
 /**
+ * // copy (or setup symbolic link) vf-pn.js to your public folder.
+ * // alternatively, you can use any script src and class, provided you call setHoneypot() and generateScript() correctly.
+ *
  * use VigilantForm\Kit\VigilantFormKit;
  *
  * $vigilantFormKit = new VigilantFormKit("<SERVER_URL>", "<CLIENT_ID>", "<CLIENT_SECRET>");
@@ -16,9 +19,11 @@ use UnexpectedValueException;
  * // optional, defaults to (new SessionBag(), "vigilantform_")
  * $vigilantFormKit->setSession($session, "<PREFIX>");
  *
- * // optional, defaults to ("age", "form_sequence")
+ * // optional, defaults to ("age", "form_sequence", "/vf-pn.js", "vf-pn")
  * // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
- * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>")
+ * // note: "<SCRIPT_SRC>" must be a public javascript file location.
+ * // note: "<SCRIPT_CLASS>" must be the identifier used to process the honeypot in said javascript.
+ * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>")
  *
  * // optional, defaults to (new NullLogger())
  * $vigilantFormKit->setLogger($logger);
@@ -56,6 +61,10 @@ class VigilantFormKit implements LoggerAwareInterface
 
     protected const DEFAULT_SEQUENCE = 'form_sequence';
 
+    protected const DEFAULT_SCRIPT_SRC = '/vf-pn.js';
+
+    protected const DEFAULT_SCRIPT_CLASS = 'vf-pn';
+
     /** @var int sequence for this page view */
     protected $seq_id;
 
@@ -83,6 +92,12 @@ class VigilantFormKit implements LoggerAwareInterface
     /** @var string name of the sequence form field, defaults to "form_sequence" */
     protected $sequence;
 
+    /** @var string name of javascript file included with each honeypot, defaults to "/vf-pn.js" */
+    protected $script_src;
+
+    /** @var string name of the html class on the honeypot container, defaults to "vf-pn" */
+    protected $script_class;
+
     /* LoggerInterface $logger from LoggerAwareTrait */
 
     /* ---- Public Functions ---- */
@@ -102,11 +117,13 @@ class VigilantFormKit implements LoggerAwareInterface
             'id'     => $client_id,
             'secret' => $client_secret,
         ];
-        $this->session  = null; /* defer */
-        $this->prefix   = static::DEFAULT_PREFIX;
-        $this->honeypot = static::DEFAULT_HONEYPOT;
-        $this->sequence = static::DEFAULT_SEQUENCE;
-        $this->logger   = new NullLogger();
+        $this->session      = null; /* defer */
+        $this->prefix       = static::DEFAULT_PREFIX;
+        $this->honeypot     = static::DEFAULT_HONEYPOT;
+        $this->sequence     = static::DEFAULT_SEQUENCE;
+        $this->script_src   = static::DEFAULT_SCRIPT_SRC;
+        $this->script_class = static::DEFAULT_SCRIPT_CLASS;
+        $this->logger       = new NullLogger();
     }
 
     /**
@@ -136,11 +153,15 @@ class VigilantFormKit implements LoggerAwareInterface
     /**
      * @param string $honeypot Optional, name of the honeypot form field, defaults to "age".
      * @param string $sequence Optional, name of the sequence form field, defaults to "form_sequence".
+     * @param string $script_src Optional, name of javascript file included with each honeypot, defaults to "/vf-pn.js".
+     * @param string $script_class Optional, name of the html class on the honeypot container, defaults to "vf-pn".
      */
-    public function setHoneypot(string $honeypot = null, string $sequence = null): void
+    public function setHoneypot(string $honeypot = null, string $sequence = null, string $script_src = null, string $script_class = null): void
     {
-        $this->honeypot = $honeypot ?: static::DEFAULT_HONEYPOT;
-        $this->sequence = $sequence ?: static::DEFAULT_SEQUENCE;
+        $this->honeypot     = $honeypot     ?: static::DEFAULT_HONEYPOT;
+        $this->sequence     = $sequence     ?: static::DEFAULT_SEQUENCE;
+        $this->script_src   = $script_src   ?: static::DEFAULT_SCRIPT_SRC;
+        $this->script_class = $script_class ?: static::DEFAULT_SCRIPT_CLASS;
     }
 
     /* setLogger() provided by LoggerAwareTrait */
@@ -208,22 +229,41 @@ class VigilantFormKit implements LoggerAwareInterface
         [$second, $micro] = $this->mathProblem($this->seq_time);
 
         return <<<HTML
-<div id="{$this->honeypot}_c{$index}">
-    <input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
+<input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
+<div id="{$this->honeypot}_c{$index}" class="{$this->script_class}" data-first="{$second}" data-second="{$micro}">
     <label for="{$this->honeypot}_i{$index}">What is {$second} plus {$micro}?</label>
     <input type="text" id="{$this->honeypot}_i{$index}" name="{$this->honeypot}" autocomplete="off">
 </div>
-<script>
-    document.getElementById("{$this->honeypot}_c{$index}").style.position   = "absolute";
-    document.getElementById("{$this->honeypot}_c{$index}").style.height     = "12px";
-    document.getElementById("{$this->honeypot}_c{$index}").style.width      = "12px";
-    document.getElementById("{$this->honeypot}_c{$index}").style.textIndent = "12px";
-    document.getElementById("{$this->honeypot}_c{$index}").style.overflow   = "hidden";
-
-    document.getElementById("{$this->honeypot}_i{$index}").tabIndex = -1;
-    document.getElementById("{$this->honeypot}_i{$index}").value = {$second} + {$micro};
-</script>
+<script src="{$this->script_src}"></script>
 HTML;
+    }
+
+    /**
+     * One way to support the javascript needed that the honeypot needs, since inlining is an issue with CSP.
+     * @return Returns string of JavaScript which needs to be found when user requests "script_src".
+     */
+    public static function generateScript(): string
+    {
+        return <<<JAVASCRIPT
+(function () {
+    var foo = document.getElementsByClassName("{$this->script_class}")[0];
+    if (foo) {
+        foo.style.position   = "absolute";
+        foo.style.height     = "11px";
+        foo.style.width      = "11px";
+        foo.style.textIndent = "11px";
+        foo.style.overflow   = "hidden";
+        foo.className        = "";
+
+        var bar = foo.getElementsByTagName("input")[0];
+        if (bar) {
+            bar.tabIndex  = -1;
+            bar.value     = parseInt(foo.getAttribute("data-first")) + parseInt(foo.getAttribute("data-second"));
+            bar.className = "";
+        }
+    }
+})();
+JAVASCRIPT;
     }
 
     /**
