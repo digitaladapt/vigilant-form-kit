@@ -229,8 +229,8 @@ class VigilantFormKit implements LoggerAwareInterface
         [$second, $micro] = $this->mathProblem($this->seq_time);
 
         return <<<HTML
+<input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
 <div id="{$this->honeypot}_c{$index}" class="{$this->script_class}" data-first="{$second}" data-second="{$micro}">
-    <input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
     <label for="{$this->honeypot}_i{$index}">What is {$second} plus {$micro}?</label>
     <input type="text" id="{$this->honeypot}_i{$index}" name="{$this->honeypot}" autocomplete="off">
 </div>
