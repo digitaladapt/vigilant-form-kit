@@ -423,7 +423,12 @@ JAVASCRIPT;
         if ($then) {
             /* calculate duration */
             $diff     = $now->diff($then, true);
-            $duration = $diff->format('%s.%F');
+            $factors  = [24.0, 60.0, 60.0, 1.0];
+            $bits     = explode('|', $diff->format('%a|%h|%i|%s.%F'));
+            $duration = 0.0;
+            foreach ($bits as $index => $bit) {
+                $duration = $factors[$index] * ($duration + (float)$bit);
+            }
 
             /* determine if the user failed the honeypot test */
             [$second, $micro] = $this->mathProblem($then);
