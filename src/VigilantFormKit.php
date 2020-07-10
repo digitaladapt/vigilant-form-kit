@@ -5,7 +5,7 @@ namespace VigilantForm\Kit;
 use DateTime;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
-use Psr\Log\{LoggerAwareInterface, LoggerAwareTrait, LoggerInterface, NullLogger};
+use Psr\Log\{LoggerAwareInterface, LoggerAwareTrait, NullLogger};
 use UnexpectedValueException;
 
 /**
@@ -133,7 +133,7 @@ class VigilantFormKit implements LoggerAwareInterface
      * @throws UnexpectedValueException If the given $session object lacks required methods.
      * @return void
      */
-    public function setSession(object $session = null, string $prefix = null): void
+    public function setSession($session = null, string $prefix = null): void
     {
         if (!$session) {
             /* no $session given, default to SessionBag */
@@ -240,9 +240,9 @@ HTML;
 
     /**
      * One way to support the javascript needed that the honeypot needs, since inlining is an issue with CSP.
-     * @return Returns string of JavaScript which needs to be found when user requests "script_src".
+     * @return string Returns string of JavaScript which needs to be found when user requests "script_src".
      */
-    public static function generateScript(): string
+    public function generateScript(): string
     {
         return <<<JAVASCRIPT
 (function () {
