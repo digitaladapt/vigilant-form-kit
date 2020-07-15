@@ -44,9 +44,12 @@ $vigilantFormKit = new VigilantFormKit("<SERVER_URL>", "<CLIENT_ID>", "<CLIENT_S
 // note: for Laravel you can use $request->session().
 //$vigilantFormKit->setSession($session, "<PREFIX>");
 
-// optional, defaults to ("age", "form_sequence")
+// optional, defaults to ("age", "form_sequence", "/vf-pn.js", "vf-pn", false)
 // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
-//$vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>")
+// note: "<SCRIPT_SRC>" must be a public javascript file location.
+// note: "<SCRIPT_CLASS>" must be the identifier used to process the honeypot in said javascript.
+// note: <REQUIRE_JS> bool, if true, script_src will be loaded via RequireJS.
+//$vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>", <REQUIRE_JS>)
 
 // optional, defaults to (new NullLogger())
 //$vigilantFormKit->setLogger($logger);
