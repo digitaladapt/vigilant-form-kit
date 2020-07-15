@@ -19,11 +19,12 @@ use UnexpectedValueException;
  * // optional, defaults to (new SessionBag(), "vigilantform_")
  * $vigilantFormKit->setSession($session, "<PREFIX>");
  *
- * // optional, defaults to ("age", "form_sequence", "/vf-pn.js", "vf-pn")
+ * // optional, defaults to ("age", "form_sequence", "/vf-pn.js", "vf-pn", false)
  * // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
  * // note: "<SCRIPT_SRC>" must be a public javascript file location.
  * // note: "<SCRIPT_CLASS>" must be the identifier used to process the honeypot in said javascript.
- * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>")
+ * // note: <REQUIRE_JS> bool, if true, script_src will be loaded via RequireJS.
+ * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>", <REQUIRE_JS>)
  *
  * // optional, defaults to (new NullLogger())
  * $vigilantFormKit->setLogger($logger);
@@ -65,6 +66,8 @@ class VigilantFormKit implements LoggerAwareInterface
 
     protected const DEFAULT_SCRIPT_CLASS = 'vf-pn';
 
+    protected const DEFAULT_REQUIRE_JS = false;
+
     /** @var int sequence for this page view */
     protected $seq_id;
 
@@ -98,6 +101,9 @@ class VigilantFormKit implements LoggerAwareInterface
     /** @var string name of the html class on the honeypot container, defaults to "vf-pn" */
     protected $script_class;
 
+    /** @var bool identify if script_src is included via require_js, defaults to false */
+    protected $require_js;
+
     /* LoggerInterface $logger from LoggerAwareTrait */
 
     /* ---- Public Functions ---- */
@@ -123,6 +129,7 @@ class VigilantFormKit implements LoggerAwareInterface
         $this->sequence     = static::DEFAULT_SEQUENCE;
         $this->script_src   = static::DEFAULT_SCRIPT_SRC;
         $this->script_class = static::DEFAULT_SCRIPT_CLASS;
+        $this->require_js   = static::DEFAULT_REQUIRE_JS;
         $this->logger       = new NullLogger();
     }
 
@@ -155,13 +162,15 @@ class VigilantFormKit implements LoggerAwareInterface
      * @param string $sequence Optional, name of the sequence form field, defaults to "form_sequence".
      * @param string $script_src Optional, name of javascript file included with each honeypot, defaults to "/vf-pn.js".
      * @param string $script_class Optional, name of the html class on the honeypot container, defaults to "vf-pn".
+     * @param bool $require_js Optional, identify if script_src is included via require_js, defaults to false.
      */
-    public function setHoneypot(string $honeypot = null, string $sequence = null, string $script_src = null, string $script_class = null): void
+    public function setHoneypot(string $honeypot = null, string $sequence = null, string $script_src = null, string $script_class = null, bool $require_js = null): void
     {
         $this->honeypot     = $honeypot     ?: static::DEFAULT_HONEYPOT;
         $this->sequence     = $sequence     ?: static::DEFAULT_SEQUENCE;
         $this->script_src   = $script_src   ?: static::DEFAULT_SCRIPT_SRC;
         $this->script_class = $script_class ?: static::DEFAULT_SCRIPT_CLASS;
+        $this->require_js   = $require_js   ?? static::DEFAULT_REQUIRE_JS; /* check against null, to allow false */
     }
 
     /* setLogger() provided by LoggerAwareTrait */
@@ -228,13 +237,19 @@ class VigilantFormKit implements LoggerAwareInterface
 
         [$second, $micro] = $this->mathProblem($this->seq_time);
 
+        if ($this->require_js) {
+            $script_html = "<script>require([\"{$this->script_src}\"], function(){});</script>";
+        } else {
+            $script_html = "<script src=\"{$this->script_src}\"></script>";
+        }
+
         return <<<HTML
 <input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
 <div id="{$this->honeypot}_c{$index}" class="{$this->script_class}" data-first="{$second}" data-second="{$micro}">
     <label for="{$this->honeypot}_i{$index}">What is {$second} plus {$micro}?</label>
     <input type="text" id="{$this->honeypot}_i{$index}" name="{$this->honeypot}" autocomplete="off">
 </div>
-<script src="{$this->script_src}"></script>
+{$script_html}
 HTML;
     }
 
