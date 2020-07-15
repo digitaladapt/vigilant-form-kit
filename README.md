@@ -29,7 +29,7 @@ meanwhile junk form submissions get logged to a file for periodic review, and sp
 ## So how is it used?
 First you add the library:
 ```bash
-composer require vigilant-form-kit
+composer require digitaladapt/vigilant-form-kit
 ```
 
 Then you hook it into your application:
@@ -68,7 +68,7 @@ echo $vigilantFormKit->generateHoneypot();
 if (!empty($_POST)) {
     try {
         // will determine if user failed the honeypot test, calculate duration, and submit to server.
-        $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST)
+        $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST);
     } catch (UnexpectedValueException $exception) {
         // handle submitForm failure
     }
