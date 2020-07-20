@@ -23,7 +23,7 @@ use UnexpectedValueException;
  * // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
  * // note: "<SCRIPT_SRC>" must be a public javascript file location.
  * // note: "<SCRIPT_CLASS>" must be the identifier used to process the honeypot in said javascript.
- * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>")
+ * $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>");
  *
  * // optional, defaults to (new NullLogger())
  * $vigilantFormKit->setLogger($logger);
@@ -211,6 +211,32 @@ class VigilantFormKit implements LoggerAwareInterface
                 ($_SERVER['REQUEST_URI'] ?? '/'),
         ];
         $this->session->put($this->addPrefix('sequence'), $sequenceList);
+    }
+
+    /**
+     * Access to all the internal information needed for custom honeypot html/js.
+     * @param bool $increment Optional, set to false to prevent instance from incrementing.
+     * @return array Returns an associated array containing:
+     * honeypot, instance, math[0,1], script_class, script_src, sequence, and seq_id.
+     */
+    public function getStatus(bool $increment = true): array
+    {
+        $this->loadSession();
+
+        $index = $this->instance;
+        if ($increment) {
+            $this->instance++;
+        }
+
+        return [
+            'honeypot'     => $this->honeypot,
+            'instance'     => $index,
+            'math'         => $this->mathProblem($this->seq_time),
+            'script_class' => $this->script_class,
+            'script_src'   => $this->script_src,
+            'sequence'     => $this->sequence,
+            'seq_id'       => $this->seq_id,
+        ];
     }
 
     /**

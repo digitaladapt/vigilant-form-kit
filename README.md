@@ -29,7 +29,7 @@ meanwhile junk form submissions get logged to a file for periodic review, and sp
 ## So how is it used?
 First you add the library:
 ```bash
-composer require vigilant-form-kit
+composer require digitaladapt/vigilant-form-kit
 ```
 
 Then you hook it into your application:
@@ -44,9 +44,11 @@ $vigilantFormKit = new VigilantFormKit("<SERVER_URL>", "<CLIENT_ID>", "<CLIENT_S
 // note: for Laravel you can use $request->session().
 //$vigilantFormKit->setSession($session, "<PREFIX>");
 
-// optional, defaults to ("age", "form_sequence")
+// optional, defaults to ("age", "form_sequence", "/vf-pn.js", "vf-pn")
 // note: "<HONEYPOT>" and "<SEQUENCE>" must be unique form field names.
-//$vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>")
+// note: "<SCRIPT_SRC>" must be a public javascript file location.
+// note: "<SCRIPT_CLASS>" must be the identifier used to process the honeypot in said javascript.
+$vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRIPT_CLASS>");
 
 // optional, defaults to (new NullLogger())
 //$vigilantFormKit->setLogger($logger);
@@ -65,7 +67,7 @@ echo $vigilantFormKit->generateHoneypot();
 if (!empty($_POST)) {
     try {
         // will determine if user failed the honeypot test, calculate duration, and submit to server.
-        $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST)
+        $vigilantFormKit->submitForm("<WEBSITE>", "<FORM_TITLE>", $_POST);
     } catch (UnexpectedValueException $exception) {
         // handle submitForm failure
     }
