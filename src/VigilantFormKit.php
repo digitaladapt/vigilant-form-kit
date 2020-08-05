@@ -168,8 +168,9 @@ class VigilantFormKit implements LoggerAwareInterface
 
     /**
      * Sets various meta data, based on $_SERVER, so we have it when the form is submitted.
+     * @param bool $useReferral Optional, defaults to false, set to true if within non-page (script or image) file.
      */
-    public function trackSource(): void
+    public function trackSource(bool $useReferral = false): void
     {
         $this->loadSession();
 
@@ -205,10 +206,14 @@ class VigilantFormKit implements LoggerAwareInterface
         $this->seq_time = $time;
         $sequenceList[$this->seq_id] = [
             'time' => $time->format(static::DATE_FORMAT),
-            'url'  =>
+            'url'  => ($useReferral ?
+                /* use the referral if instructed */
+                ($_SERVER['HTTP_REFERER'] ?? null) :
+                /* however, url is normally based on the request_uri */
                 ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
                 ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
-                ($_SERVER['REQUEST_URI'] ?? '/'),
+                ($_SERVER['REQUEST_URI'] ?? '/')
+            ),
         ];
         $this->session->put($this->addPrefix('sequence'), $sequenceList);
     }
@@ -337,7 +342,7 @@ JAVASCRIPT;
             'referral' => $this->session->get($this->addPrefix('referral')),
             'landing'  => $this->session->get($this->addPrefix('landing')),
             'submit'   => $submit,
-            'details'  => array_filter($this->session->get($this->addPrefix('sequence'), [0 => false])),
+            'details'  => array_slice(array_filter($this->session->get($this->addPrefix('sequence'), [0 => false])), 0, 999),
         ];
 
         /* log the request */
