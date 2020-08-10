@@ -3,6 +3,7 @@
 namespace VigilantForm\Kit;
 
 use DateTime;
+use DateTimeInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Psr\Log\{LoggerAwareInterface, LoggerAwareTrait, NullLogger};
@@ -54,6 +55,8 @@ class VigilantFormKit implements LoggerAwareInterface
     use LoggerAwareTrait;
 
     protected const DATE_FORMAT = 'Y-m-d H:i:s.u';
+
+    protected const REFERRAL_REPEAT = 15.0; /* seconds */
 
     protected const DEFAULT_PREFIX = 'vigilantform_';
 
@@ -186,36 +189,62 @@ class VigilantFormKit implements LoggerAwareInterface
         }
 
         /* links - set of first page */
-        if (!$this->session->exists($this->addPrefix('referral'))) {
-            $this->session->put($this->addPrefix('referral'), $_SERVER['HTTP_REFERER'] ?? null);
-        }
-        if (!$this->session->exists($this->addPrefix('landing'))) {
-            $this->session->put($this->addPrefix('landing'),
-                ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
-                ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
-                ($_SERVER['REQUEST_URI'] ?? '/')
-            );
+        if ($useReferral) {
+            /* handle edge-case: true first page failed to log, track landing as best as we can */
+            if (!$this->session->exists($this->addPrefix('referral'))) {
+                $this->session->put($this->addPrefix('referral'), null);
+            }
+            if (!$this->session->exists($this->addPrefix('landing'))) {
+                $this->session->put($this->addPrefix('landing'), $_SERVER['HTTP_REFERER'] ?? null);
+            }
+        } else {
+            /* normal case: properly track referral and landing pages */
+            if (!$this->session->exists($this->addPrefix('referral'))) {
+                $this->session->put($this->addPrefix('referral'), $_SERVER['HTTP_REFERER'] ?? null);
+            }
+            if (!$this->session->exists($this->addPrefix('landing'))) {
+                $this->session->put($this->addPrefix('landing'),
+                    ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
+                    ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
+                    ($_SERVER['REQUEST_URI'] ?? '/')
+                );
+            }
         }
 
         /* determine when this page was requested */
         $time = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT'] ?? number_format(microtime(true), 6, '.', ''));
 
         /* manage sequence, array starts with one element so all our ids are positive */
-        $sequenceList   = $this->session->get($this->addPrefix('sequence'), [0 => false]);
-        $this->seq_id   = count($sequenceList);
-        $this->seq_time = $time;
-        $sequenceList[$this->seq_id] = [
-            'time' => $time->format(static::DATE_FORMAT),
-            'url'  => ($useReferral ?
-                /* use the referral if instructed */
-                ($_SERVER['HTTP_REFERER'] ?? null) :
-                /* however, url is normally based on the request_uri */
-                ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
-                ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
-                ($_SERVER['REQUEST_URI'] ?? '/')
-            ),
-        ];
-        $this->session->put($this->addPrefix('sequence'), $sequenceList);
+        $sequenceList = $this->session->get($this->addPrefix('sequence'), [0 => false]);
+
+        /* repeat referral based requests within 15 seconds are considered duplicates */
+        if ($useReferral &&
+            ($lastSequence = end($sequenceList)) &&
+            isset($lastSequence['time'], $lastSequence['url']) &&
+            $lastSequence['url'] === $_SERVER['HTTP_REFERER'] &&
+            ($lastTime = DateTime::createFromFormat(static::DATE_FORMAT, $lastSequence['time'])) &&
+            $this->dateDiff($time, $lastTime) < static::REFERRAL_REPEAT
+        ) {
+            /* repeat referral request, use previous record */
+            $this->seq_id = count($sequenceList) - 1;
+            $this->seq_time = $lastTime;
+        } else {
+            /* normal scenario: make new sequence record */
+            $this->seq_id   = count($sequenceList);
+            $this->seq_time = $time;
+            $sequenceList[$this->seq_id] = [
+                'time' => $time->format(static::DATE_FORMAT),
+                'url'  => ($useReferral ?
+                    /* use the referral if instructed */
+                    ($_SERVER['HTTP_REFERER'] ?? null) :
+                    /* however, url is normally based on the request_uri */
+                    ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
+                    ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
+                    ($_SERVER['REQUEST_URI'] ?? '/')
+                ),
+            ];
+            $this->session->put($this->addPrefix('sequence'), $sequenceList);
+        }
     }
 
     /**
@@ -452,14 +481,7 @@ JAVASCRIPT;
         $then = DateTime::createFromFormat(static::DATE_FORMAT, $sequenceList[$seq_id]['time'] ?? $sequenceList[$this->seq_id - 1]['time'] ?? false);
 
         if ($then) {
-            /* calculate duration */
-            $diff     = $now->diff($then, true);
-            $factors  = [24.0, 60.0, 60.0, 1.0];
-            $bits     = explode('|', $diff->format('%a|%h|%i|%s.%F'));
-            $duration = 0.0;
-            foreach ($bits as $index => $bit) {
-                $duration = $factors[$index] * ($duration + (float)$bit);
-            }
+            $duration = $this->dateDiff($now, $then);
 
             /* determine if the user failed the honeypot test */
             [$second, $micro] = $this->mathProblem($then);
@@ -473,5 +495,24 @@ JAVASCRIPT;
         }
 
         return [$duration, $honeypot, $submit];
+    }
+
+    /**
+     * @param DateTimeInterface $now
+     * @param DateTimeInterface $then
+     * @return float Returns difference between the two dates in seconds.
+     */
+    protected function dateDiff(DateTimeInterface $now, DateTimeInterface $then): float
+    {
+        /* calculate duration */
+        /* we convert from days to hours add hours, and then repeat with converting to minutes then to seconds */
+        $diff     = $now->diff($then, true);
+        $factors  = [24.0, 60.0, 60.0, 1.0];
+        $bits     = explode('|', $diff->format('%a|%h|%i|%s.%F'));
+        $duration = 0.0;
+        foreach ($bits as $index => $bit) {
+            $duration = $factors[$index] * ($duration + (float)$bit);
+        }
+        return $duration;
     }
 }
