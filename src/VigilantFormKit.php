@@ -32,15 +32,20 @@ use UnexpectedValueException;
  *
  *
  * // once everything is setup, run the tracking
+ * // if this request is a non-page (script or image) file,
+ * // pass true to track the referral page instead.
  * $vigilantFormKit->trackSource();
  *
  *
  *
- * // within each html form, recommend just before submit
+ * // once per form, add honeypot field, recommend just before submit
  * echo $vigilantFormKit->generateHoneypot();
  *
  *
  *
+ * use UnexpectedValueException;
+ *
+ * // handle form submission
  * if (!empty($_POST)) {
  *     try {
  *         // will determine if user failed the honeypot test, calculate duration, and submit to server.
@@ -131,8 +136,8 @@ class VigilantFormKit implements LoggerAwareInterface
 
     /**
      * To disable prefix set to "", null will result in the default prefix.
-     * @param object $session Optional, object with exists(), get(), and put(); defaults to SessionBag.
-     * @param string $prefix Optional, prefix for the fields within session, defaults to "vigilantform_".
+     * @param object|null $session Optional, object with exists(), get(), and put(); defaults to SessionBag.
+     * @param string|null $prefix Optional, prefix for the fields within session, defaults to "vigilantform_".
      * @throws UnexpectedValueException If the given $session object lacks required methods.
      * @return void
      */
@@ -154,10 +159,10 @@ class VigilantFormKit implements LoggerAwareInterface
     }
 
     /**
-     * @param string $honeypot Optional, name of the honeypot form field, defaults to "age".
-     * @param string $sequence Optional, name of the sequence form field, defaults to "form_sequence".
-     * @param string $script_src Optional, name of javascript file included with each honeypot, defaults to "/vf-pn.js".
-     * @param string $script_class Optional, name of the html class on the honeypot container, defaults to "vf-pn".
+     * @param string|null $honeypot Optional, name of the honeypot form field, defaults to "age".
+     * @param string|null $sequence Optional, name of the sequence form field, defaults to "form_sequence".
+     * @param string|null $script_src Optional, name of javascript file included with each honeypot, defaults to "/vf-pn.js".
+     * @param string|null $script_class Optional, name of the html class on the honeypot container, defaults to "vf-pn".
      */
     public function setHoneypot(string $honeypot = null, string $sequence = null, string $script_src = null, string $script_class = null): void
     {

@@ -59,7 +59,7 @@ $vigilantFormKit->trackSource();
 ```
 
 ```php
-/* once per form, add honeypot field */
+/* once per form, add honeypot field, recommend just before submit */
 echo $vigilantFormKit->generateHoneypot();
 ```
 
