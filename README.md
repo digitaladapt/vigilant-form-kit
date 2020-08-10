@@ -34,7 +34,6 @@ composer require digitaladapt/vigilant-form-kit
 
 Then you hook it into your application:
 ```php
-use UnexpectedValueException;
 use VigilantForm\Kit\VigilantFormKit;
 
 /* once per page, setup and run the tracking */
@@ -54,14 +53,18 @@ $vigilantFormKit->setHoneypot("<HONEYPOT>", "<SEQUENCE>", "<SCRIPT_SRC>", "<SCRI
 //$vigilantFormKit->setLogger($logger);
 
 // once everything is setup, run the tracking
+// if this request is a non-page (script or image) file,
+// pass true to track the referral page instead.
 $vigilantFormKit->trackSource();
+```
 
-
-
+```php
 /* once per form, add honeypot field */
 echo $vigilantFormKit->generateHoneypot();
+```
 
-
+```php
+use UnexpectedValueException;
 
 /* handle form submission */
 if (!empty($_POST)) {
