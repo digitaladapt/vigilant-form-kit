@@ -225,7 +225,7 @@ class VigilantFormKit implements LoggerAwareInterface
         /* repeat referral based requests within 15 seconds are considered duplicates */
         if ($useReferral &&
             ($lastSequence = end($sequenceList)) &&
-            isset($lastSequence['time'], $lastSequence['url']) &&
+            isset($_SERVER['HTTP_REFERER'], $lastSequence['time'], $lastSequence['url']) &&
             $lastSequence['url'] === $_SERVER['HTTP_REFERER'] &&
             ($lastTime = DateTime::createFromFormat(static::DATE_FORMAT, $lastSequence['time'])) &&
             $this->dateDiff($time, $lastTime) < static::REFERRAL_REPEAT
