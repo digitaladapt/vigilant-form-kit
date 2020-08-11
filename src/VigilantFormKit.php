@@ -217,7 +217,8 @@ class VigilantFormKit implements LoggerAwareInterface
         }
 
         /* determine when this page was requested */
-        $time = DateTime::createFromFormat('U.u', $_SERVER['REQUEST_TIME_FLOAT'] ?? number_format(microtime(true), 6, '.', ''));
+        /* note: must format to handle edge case of time being exactly a whole second */
+        $time = DateTime::createFromFormat('U.u', number_format($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true), 6, '.', ''));
 
         /* manage sequence, array starts with one element so all our ids are positive */
         $sequenceList = $this->session->get($this->addPrefix('sequence'), [0 => false]);
