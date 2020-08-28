@@ -240,9 +240,9 @@ class VigilantFormKit implements LoggerAwareInterface
             $this->seq_time = $time;
             $sequenceList[$this->seq_id] = [
                 'time' => $time->format(static::DATE_FORMAT),
-                'url'  => ($useReferral ?
-                    /* use the referral if instructed */
-                    ($_SERVER['HTTP_REFERER'] ?? null) :
+                'url'  => ($useReferral && ($_SERVER['HTTP_REFERER'] ?? false) ?
+                    /* use the referral if instructed (and available) */
+                    $_SERVER['HTTP_REFERER'] :
                     /* however, url is normally based on the request_uri */
                     ($_SERVER['REQUEST_SCHEME'] ?? 'http') . '://' .
                     ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost') .
@@ -373,11 +373,16 @@ JAVASCRIPT;
             'title'   => $form_title,
         ];
 
+        /* ensure we filter out any invalid details */
+        $filter = function ($val) {
+            return is_array($val) && isset($val['time'], $val['url']);
+        };
+
         $links = [
             'referral' => $this->session->get($this->addPrefix('referral')),
             'landing'  => $this->session->get($this->addPrefix('landing')),
             'submit'   => $submit,
-            'details'  => array_slice(array_filter($this->session->get($this->addPrefix('sequence'), [0 => false])), 0, 999),
+            'details'  => array_slice(array_filter($this->session->get($this->addPrefix('sequence'), [0 => false]), $filter), 0, 999),
         ];
 
         /* log the request */
