@@ -283,9 +283,10 @@ class VigilantFormKit implements LoggerAwareInterface
      * Call once per html form, reusing the html multiple times will cause problems.
      * If user has javascript disabled, to pass the honeypot, they'll be asked
      * a simple math problem. If they have javascript, they will see nothing.
+     * @param bool $skipScript Optional, set to true if the javascript is included at the bottom of all pages with forms.
      * @return string Returns chunk of html to insert into a form.
      */
-    public function generateHoneypot(): string
+    public function generateHoneypot($skipScript = false): string
     {
         $this->loadSession();
 
@@ -294,14 +295,19 @@ class VigilantFormKit implements LoggerAwareInterface
 
         [$second, $micro] = $this->mathProblem($this->seq_time);
 
-        return <<<HTML
+        $html = <<<HTML
 <input type="hidden" name="{$this->sequence}" value="{$this->seq_id}">
 <div id="{$this->honeypot}_c{$index}" class="{$this->script_class}" data-first="{$second}" data-second="{$micro}">
     <label for="{$this->honeypot}_i{$index}">What is {$second} plus {$micro}?</label>
     <input type="text" id="{$this->honeypot}_i{$index}" name="{$this->honeypot}" autocomplete="off">
 </div>
+HTML;
+        if (! $skipScript) {
+            $html .= <<<HTML
 <script src="{$this->script_src}"></script>
 HTML;
+        }
+        return $html;
     }
 
     /**
